@@ -26,10 +26,11 @@ jobs:
       - name: Run scraper
         run: npm run scrape
 
-      - name: Commit data.json if changed
+      - name: Commit data.json (and debug.log if present) if changed
         run: |
           git config user.name "kala-tracker-bot"
           git config user.email "actions@github.com"
           git add data.json
+          if [ -f debug.log ]; then git add debug.log; fi
           git diff --quiet --cached || git commit -m "Update follower/backer count"
           git push
