@@ -1,4 +1,6 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 const fs = require('fs');
 
 const CAMPAIGN_URL = 'https://www.kickstarter.com/projects/kalatime/kala-watches-series-001';
@@ -37,12 +39,25 @@ function tryPatterns(text, patterns) {
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
     );
+    await page.setViewport({ width: 1366, height: 900 });
     await page.goto(CAMPAIGN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Let client-side rendering settle.
-    await new Promise((r) => setTimeout(r, 2500));
+    // If Cloudflare's challenge page is showing, wait it out — it can take
+    // a few seconds to auto-resolve and redirect to the real page.
+    let text = await page.evaluate(() => document.body.innerText);
+    let attempts = 0;
+    while (
+      attempts < 4 &&
+      /security verification|just a moment|checking your browser/i.test(text)
+    ) {
+      attempts += 1;
+      await new Promise((r) => setTimeout(r, 5000));
+      text = await page.evaluate(() => document.body.innerText);
+    }
 
-    const text = await page.evaluate(() => document.body.innerText);
+    // Let client-side rendering settle if we made it past any challenge.
+    await new Promise((r) => setTimeout(r, 2500));
+    text = await page.evaluate(() => document.body.innerText);
 
     const backers = tryPatterns(text, BACKER_PATTERNS);
     const followers = tryPatterns(text, FOLLOWER_PATTERNS);
@@ -52,6 +67,9 @@ function tryPatterns(text, patterns) {
       result = { value: Number(backers), label: 'Backers', status: 'ok' };
     } else if (followers) {
       result = { value: Number(followers), label: 'Followers', status: 'ok' };
+    } else if (/security verification|just a moment|checking your browser/i.test(text)) {
+      result = { value: null, label: 'Blocked by Cloudflare', status: 'blocked' };
+      fs.writeFileSync('debug.log', text);
     } else {
       result = { value: null, label: 'No match', status: 'nomatch' };
       fs.writeFileSync('debug.log', text);
